@@ -31,3 +31,8 @@ downloads/
 *.mkv
 *.m4a
 *.part
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
