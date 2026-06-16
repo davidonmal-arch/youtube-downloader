@@ -1,4 +1,4 @@
-"""Обёртка над yt-dlp. Без cookies, без сюрпризов."""
+"""Thin wrapper around yt-dlp. No cookies, no surprises."""
 from __future__ import annotations
 
 import re
@@ -10,10 +10,10 @@ from typing import Callable, Optional
 import yt_dlp
 
 
-# ---------- где искать ffmpeg ----------
+# ---------- ffmpeg discovery ----------
 
 def find_ffmpeg() -> Optional[str]:
-    """Ищем нормальный ffmpeg. Сначала бандл от imageio-ffmpeg, потом PATH."""
+    """Prefer the imageio-ffmpeg bundle (modern, static); fall back to PATH."""
     try:
         import imageio_ffmpeg
         path = imageio_ffmpeg.get_ffmpeg_exe()
@@ -25,31 +25,71 @@ def find_ffmpeg() -> Optional[str]:
     return found if found else None
 
 
-# ---------- пресеты качества ----------
+# ---------- quality presets ----------
 
-# Приоритет: m4a (AAC) → любой лучший аудио-поток. Так когда доступен m4a
-# (YouTube даёт его для ≤1080p), merge пройдёт без перекодирования; для 4K/1440p
-# (где m4a обычно нет) упадём на opus/webm, и тогда перекодирует постпроцессор ниже.
-QUALITY_PRESETS: dict[str, str] = {
-    "Лучшее (авто)":          "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio[ext=m4a]/best[ext=mp4]/best",
-    "4K · 2160p":             "bestvideo[height<=2160]+bestaudio[ext=m4a]/bestvideo[height<=2160]+bestaudio/best[height<=2160]/best",
-    "1440p":                  "bestvideo[height<=1440]+bestaudio[ext=m4a]/bestvideo[height<=1440]+bestaudio/best[height<=1440]/best",
-    "1080p":                  "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio[ext=m4a]/best[height<=1080]/best",
-    "720p":                   "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio[ext=m4a]/best[height<=720]/best",
-    "480p":                   "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio[ext=m4a]/best[height<=480]/best",
-    "360p":                   "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=360]+bestaudio[ext=m4a]/best[height<=360]/best",
-    "Только аудио (MP3)":     "bestaudio/best",
-}
+@dataclass(frozen=True)
+class QualityPreset:
+    label: str
+    format: str
+    is_audio: bool = False
 
-# ---------- модели ----------
+
+# m4a is preferred so the merge is a no-op remux when possible (≤1080p on
+# YouTube). If m4a isn't available (common at 4K/1440p) we fall back to opus
+# and the postprocessor below transcodes audio to AAC.
+QUALITY_PRESETS: list[QualityPreset] = [
+    QualityPreset(
+        "Best (auto)",
+        "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio[ext=m4a]/best[ext=mp4]/best",
+    ),
+    QualityPreset(
+        "4K · 2160p",
+        "bestvideo[height<=2160]+bestaudio[ext=m4a]/bestvideo[height<=2160]+bestaudio/best[height<=2160]/best",
+    ),
+    QualityPreset(
+        "1440p",
+        "bestvideo[height<=1440]+bestaudio[ext=m4a]/bestvideo[height<=1440]+bestaudio/best[height<=1440]/best",
+    ),
+    QualityPreset(
+        "1080p",
+        "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio[ext=m4a]/best[height<=1080]/best",
+    ),
+    QualityPreset(
+        "720p",
+        "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio[ext=m4a]/best[height<=720]/best",
+    ),
+    QualityPreset(
+        "480p",
+        "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio[ext=m4a]/best[height<=480]/best",
+    ),
+    QualityPreset(
+        "360p",
+        "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=360]+bestaudio[ext=m4a]/best[height<=360]/best",
+    ),
+    QualityPreset("Audio only (MP3)", "bestaudio/best", is_audio=True),
+]
+
+
+def quality_labels() -> list[str]:
+    return [p.label for p in QUALITY_PRESETS]
+
+
+def get_preset(label: str) -> QualityPreset:
+    for p in QUALITY_PRESETS:
+        if p.label == label:
+            return p
+    raise KeyError(label)
+
+
+# ---------- models ----------
 
 @dataclass(frozen=True)
 class VideoInfo:
     title: str
     uploader: str
-    duration: int          # секунды
+    duration: int
     thumbnail: str
-    thumbnail_bytes: bytes # пусто, если не удалось скачать
+    thumbnail_bytes: bytes
     url: str
 
     @property
@@ -62,7 +102,7 @@ class VideoInfo:
         return f"{m}:{s:02d}"
 
 
-# ---------- валидация ----------
+# ---------- validation ----------
 
 _YT_RE = re.compile(
     r"^(https?://)?(www\.|m\.|music\.)?"
@@ -78,7 +118,7 @@ def is_valid_url(url: str) -> bool:
     return bool(_YT_RE.match(url))
 
 
-# ---------- инфо о видео ----------
+# ---------- video info ----------
 
 def _fetch_thumbnail_bytes(url: str) -> bytes:
     if not url:
@@ -92,21 +132,20 @@ def _fetch_thumbnail_bytes(url: str) -> bytes:
 
 
 def fetch_info(url: str) -> VideoInfo:
-    """Тянем метаданные без скачивания + превью-картинку."""
     opts = {
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
-        "cookiefile": None,        # жёстко без cookies
+        "cookiefile": None,
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
     thumb_url = info.get("thumbnail") or ""
     return VideoInfo(
-        title=info.get("title") or "Без названия",
-        uploader=info.get("uploader") or info.get("channel") or "Неизвестно",
+        title=info.get("title") or "Untitled",
+        uploader=info.get("uploader") or info.get("channel") or "Unknown",
         duration=int(info.get("duration") or 0),
         thumbnail=thumb_url,
         thumbnail_bytes=_fetch_thumbnail_bytes(thumb_url),
@@ -114,31 +153,44 @@ def fetch_info(url: str) -> VideoInfo:
     )
 
 
-# ---------- скачивание ----------
+# ---------- download ----------
+
+class FFmpegNotFoundError(RuntimeError):
+    """Neither imageio-ffmpeg nor ffmpeg in PATH."""
+
+
+def _ensure_ffmpeg() -> str:
+    path = find_ffmpeg()
+    if not path:
+        raise FFmpegNotFoundError(
+            "ffmpeg not found. Install imageio-ffmpeg (recommended):\n"
+            "    pip install imageio-ffmpeg\n"
+            "Or add ffmpeg to PATH: https://www.gyan.dev/ffmpeg/builds/"
+        )
+    return path
+
 
 def _build_opts(
     quality: str,
     output_dir: str,
     progress_hook: Callable[[dict], None],
 ) -> dict:
-    is_audio = "аудио" in quality.lower()
+    preset = get_preset(quality)
 
     opts: dict = {
-        "format": QUALITY_PRESETS[quality],
-        # yt-dlp сам разруливает слэши и на Windows
+        "format": preset.format,
         "outtmpl": f"{output_dir}/%(title).150B [%(id)s].%(ext)s",
         "progress_hooks": [progress_hook],
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
-        "cookiefile": None,        # ← без cookies
+        "cookiefile": None,
         "restrictfilenames": False,
         "windowsfilenames": True,
     }
 
-    if is_audio:
-        # аудио → mp3, теги id3v2
+    if preset.is_audio:
         opts["postprocessors"] = [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
@@ -146,34 +198,22 @@ def _build_opts(
         }]
         opts["postprocessor_args"] = ["-id3v2_version", "4"]
     else:
-        # видео → mp4 с AAC-аудио, чтоб WMP и прочие старые плееры не падали
-        # видео копируем без перекода (быстро), аудио opus→aac если попалось
+        # Always end up with mp4 + AAC so legacy players (Windows Media Player,
+        # QuickTime, etc.) can play the result. Video stream is copied as-is to
+        # avoid a re-encode; audio is transcoded to AAC when the source is opus.
         opts["postprocessors"] = [{
             "key": "FFmpegVideoConvertor",
             "preferedformat": "mp4",
         }]
-        opts["postprocessor_args"] = ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"]
+        opts["postprocessor_args"] = [
+            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+            "-movflags", "+faststart",
+        ]
 
-    # ffmpeg: явно указываем где брать, чтоб не упёрся в PATH-раритет
     ff = find_ffmpeg()
     if ff:
         opts["ffmpeg_location"] = ff
     return opts
-
-
-class FFmpegNotFoundError(RuntimeError):
-    """Ни imageio-ffmpeg, ни ffmpeg в PATH не нашлись."""
-
-
-def _ensure_ffmpeg() -> str:
-    path = find_ffmpeg()
-    if not path:
-        raise FFmpegNotFoundError(
-            "ffmpeg не найден. Поставь imageio-ffmpeg (рекомендую):\n"
-            "    pip install imageio-ffmpeg\n"
-            "Или ffmpeg в PATH: https://www.gyan.dev/ffmpeg/builds/"
-        )
-    return path
 
 
 def download(
@@ -183,11 +223,9 @@ def download(
     progress_hook: Callable[[dict], None],
     should_cancel: Optional[Callable[[], bool]] = None,
 ) -> None:
-    """Скачивает видео/аудио. Кидает исключение, если should_cancel() вернул True."""
-    _ensure_ffmpeg()           # упадёт с понятной ошибкой, если нет ffmpeg
+    _ensure_ffmpeg()
     opts = _build_opts(quality, output_dir, progress_hook)
 
-    # обёртка: если юзер нажал отмену — кидаем сигнал
     def wrapped(d: dict) -> None:
         if should_cancel and should_cancel():
             raise _CancelledError()
@@ -200,4 +238,4 @@ def download(
 
 
 class _CancelledError(Exception):
-    """Внутренний флаг отмены скачивания."""
+    pass

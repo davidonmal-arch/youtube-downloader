@@ -1,4 +1,4 @@
-"""Главное окно YouTube Downloader."""
+"""Main window of the YouTube Downloader."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -16,7 +16,7 @@ from . import downloader
 from .workers import InfoWorker, DownloadWorker
 
 
-# ---------- тема ----------
+# ---------- theme ----------
 
 STYLESHEET = """
 QMainWindow, QWidget#root {
@@ -144,7 +144,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 """
 
 
-# ---------- карточка очереди ----------
+# ---------- queue card ----------
 
 class QueueItem(QFrame):
     def __init__(self, title: str, parent=None) -> None:
@@ -167,7 +167,7 @@ class QueueItem(QFrame):
         self.cancel_btn = QPushButton("✕")
         self.cancel_btn.setObjectName("ghost")
         self.cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.cancel_btn.setToolTip("Отменить")
+        self.cancel_btn.setToolTip("Cancel")
         self.cancel_btn.clicked.connect(self._on_cancel_clicked)
 
         top.addWidget(self.title_label, 1)
@@ -179,21 +179,19 @@ class QueueItem(QFrame):
         self.progress.setTextVisible(False)
         self.progress.setFixedHeight(8)
 
-        self.status_label = QLabel("В очереди…")
+        self.status_label = QLabel("Queued…")
         self.status_label.setObjectName("muted")
 
         layout.addLayout(top)
         layout.addWidget(self.progress)
         layout.addWidget(self.status_label)
 
-    # публичный API для MainWindow
     def request_cancel(self) -> bool:
-        """Помечаем как отменённый, чтобы воркер мог опросить флаг. Возвращает True, если ещё не отменяли."""
         if self._cancelled:
             return False
         self._cancelled = True
         self.cancel_btn.setEnabled(False)
-        self.set_state("cancelled", "Отмена…", self.progress.value())
+        self.set_state("cancelled", "Cancelling…", self.progress.value())
         return True
 
     def is_cancelled(self) -> bool:
@@ -211,7 +209,7 @@ class QueueItem(QFrame):
         eta = d.get("eta", "") or ""
 
         if d.get("status") == "finished":
-            self.set_state("downloading", "Пост-обработка…", 100)
+            self.set_state("downloading", "Post-processing…", 100)
             return
 
         bits = [pct_str, speed, f"ETA {eta}" if eta else ""]
@@ -222,20 +220,19 @@ class QueueItem(QFrame):
         self.status_label.setText(s)
 
     def mark_done(self) -> None:
-        self.set_state("done", "Готово ✓", 100)
+        self.set_state("done", "Done ✓", 100)
         self.cancel_btn.setEnabled(False)
 
     def mark_error(self, msg: str) -> None:
-        self.set_state("error", f"Ошибка: {msg}")
+        self.set_state("error", f"Error: {msg}")
         self.cancel_btn.setEnabled(False)
 
     def mark_cancelled(self) -> None:
-        self.set_state("cancelled", "Отменено")
+        self.set_state("cancelled", "Cancelled")
         self.cancel_btn.setEnabled(False)
 
     def set_state(self, state: str, status: str, percent: int = -1) -> None:
         self.setProperty("state", state)
-        # проси Qt пересчитать стили с новым property
         self.style().unpolish(self)
         self.style().polish(self)
         if status:
@@ -247,7 +244,7 @@ class QueueItem(QFrame):
         self.request_cancel()
 
 
-# ---------- главное окно ----------
+# ---------- main window ----------
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -282,7 +279,6 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(28, 22, 28, 22)
         outer.setSpacing(16)
 
-        # --- header ---
         header = QHBoxLayout()
         header.setSpacing(10)
         logo = QLabel("🎬")
@@ -291,19 +287,18 @@ class MainWindow(QMainWindow):
         title.setObjectName("h1")
         header.addWidget(logo)
         header.addWidget(title, 1)
-        subtitle = QLabel("без cookies · на yt-dlp")
+        subtitle = QLabel("no cookies · powered by yt-dlp")
         subtitle.setObjectName("muted")
         header.addWidget(subtitle, 0, Qt.AlignmentFlag.AlignBottom)
         outer.addLayout(header)
 
-        # --- URL ---
         url_card = QFrame()
         url_card.setObjectName("urlcard")
         url_layout = QVBoxLayout(url_card)
         url_layout.setContentsMargins(16, 16, 16, 16)
         url_layout.setSpacing(10)
 
-        url_caption = QLabel("Ссылка на видео")
+        url_caption = QLabel("Video URL")
         url_caption.setObjectName("h2")
         url_layout.addWidget(url_caption)
 
@@ -311,12 +306,12 @@ class MainWindow(QMainWindow):
         url_row.setSpacing(10)
         self.url_input = QLineEdit()
         self.url_input.setPlaceholderText(
-            "https://www.youtube.com/watch?v=…   или просто перетащи ссылку сюда"
+            "https://www.youtube.com/watch?v=…   or just drop a link here"
         )
         self.url_input.setClearButtonEnabled(True)
         self.url_input.textChanged.connect(self._on_url_changed)
 
-        self.paste_btn = QPushButton("Вставить")
+        self.paste_btn = QPushButton("Paste")
         self.paste_btn.setObjectName("secondary")
         self.paste_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.paste_btn.clicked.connect(self._on_paste_clicked)
@@ -326,7 +321,6 @@ class MainWindow(QMainWindow):
         url_layout.addLayout(url_row)
         outer.addWidget(url_card)
 
-        # --- preview ---
         self.preview_card = QFrame()
         self.preview_card.setObjectName("preview")
         self.preview_card.setVisible(False)
@@ -341,7 +335,7 @@ class MainWindow(QMainWindow):
             "background-color: #27272a; border-radius: 6px; color: #52525b;"
             "font-size: 11px;"
         )
-        self.thumb_label.setText("превью")
+        self.thumb_label.setText("preview")
 
         pv_text = QVBoxLayout()
         pv_text.setSpacing(4)
@@ -365,21 +359,20 @@ class MainWindow(QMainWindow):
         pv.addLayout(pv_text, 1)
         outer.addWidget(self.preview_card)
 
-        # --- settings ---
         settings_card = QFrame()
         settings_card.setObjectName("card")
         s = QVBoxLayout(settings_card)
         s.setContentsMargins(16, 16, 16, 16)
         s.setSpacing(12)
 
-        s.addWidget(self._h2("Настройки"))
+        s.addWidget(self._h2("Settings"))
 
         quality_row = QHBoxLayout()
         quality_row.setSpacing(10)
-        quality_caption = self._muted("Качество")
+        quality_caption = self._muted("Quality")
         quality_caption.setFixedWidth(120)
         self.quality_combo = QComboBox()
-        self.quality_combo.addItems(list(downloader.QUALITY_PRESETS.keys()))
+        self.quality_combo.addItems(downloader.quality_labels())
         self.quality_combo.setCurrentText("1080p")
         self.quality_combo.setCursor(Qt.CursorShape.PointingHandCursor)
         quality_row.addWidget(quality_caption)
@@ -388,11 +381,11 @@ class MainWindow(QMainWindow):
 
         output_row = QHBoxLayout()
         output_row.setSpacing(10)
-        output_caption = self._muted("Папка")
+        output_caption = self._muted("Folder")
         output_caption.setFixedWidth(120)
         self.output_edit = QLineEdit(self._output_dir)
         self.output_edit.setReadOnly(True)
-        browse_btn = QPushButton("Обзор…")
+        browse_btn = QPushButton("Browse…")
         browse_btn.setObjectName("secondary")
         browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         browse_btn.clicked.connect(self._on_browse)
@@ -403,8 +396,7 @@ class MainWindow(QMainWindow):
 
         outer.addWidget(settings_card)
 
-        # --- download button ---
-        self.download_btn = QPushButton("⬇   Скачать")
+        self.download_btn = QPushButton("⬇   Download")
         self.download_btn.setMinimumHeight(50)
         f = self.download_btn.font()
         f.setPointSize(14)
@@ -414,10 +406,9 @@ class MainWindow(QMainWindow):
         self.download_btn.clicked.connect(self._on_download)
         outer.addWidget(self.download_btn)
 
-        # --- queue ---
         qhead = QHBoxLayout()
         qhead.setSpacing(8)
-        qhead.addWidget(self._h2("Очередь"))
+        qhead.addWidget(self._h2("Queue"))
         self.queue_count = self._muted("0")
         qhead.addWidget(self.queue_count)
         qhead.addStretch(1)
@@ -473,7 +464,7 @@ class MainWindow(QMainWindow):
     def _clear_preview(self) -> None:
         self._current_info = None
         self.preview_card.setVisible(False)
-        self.thumb_label.setText("превью")
+        self.thumb_label.setText("preview")
         self.thumb_label.setPixmap(QPixmap())
 
     def _fetch_info(self) -> None:
@@ -486,9 +477,9 @@ class MainWindow(QMainWindow):
 
         self._clear_preview()
         self.preview_card.setVisible(True)
-        self.preview_title.setText("Загружаю…")
+        self.preview_title.setText("Loading…")
         self.preview_meta.setText("")
-        self.preview_status.setText("Тяну инфо о видео")
+        self.preview_status.setText("Fetching video info…")
         self.thumb_label.setText("⏳")
         self._refresh_download_button()
 
@@ -519,9 +510,9 @@ class MainWindow(QMainWindow):
                 self.thumb_label.setText("")
                 self.thumb_label.setPixmap(scaled)
             else:
-                self.thumb_label.setText("превью")
+                self.thumb_label.setText("preview")
         else:
-            self.thumb_label.setText("превью")
+            self.thumb_label.setText("preview")
 
         self._refresh_download_button()
 
@@ -529,23 +520,23 @@ class MainWindow(QMainWindow):
         if gen != self._info_gen:
             return
         self.preview_card.setVisible(True)
-        self.preview_title.setText("Не получилось загрузить")
+        self.preview_title.setText("Failed to load")
         self.preview_meta.setText(self.url_input.text().strip())
-        self.preview_status.setText(msg or "Неизвестная ошибка")
+        self.preview_status.setText(msg or "Unknown error")
         self.thumb_label.setText("⚠")
         self.thumb_label.setPixmap(QPixmap())
         self._current_info = None
         self._refresh_download_button()
 
-    # ---------- папка ----------
+    # ---------- folder ----------
 
     def _on_browse(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "Куда скачивать", self._output_dir)
+        d = QFileDialog.getExistingDirectory(self, "Save to folder", self._output_dir)
         if d:
             self._output_dir = d
             self.output_edit.setText(d)
 
-    # ---------- очередь ----------
+    # ---------- queue ----------
 
     def _on_download(self) -> None:
         if not self._current_info:
@@ -560,7 +551,6 @@ class MainWindow(QMainWindow):
     def _enqueue(self, url: str, title: str, quality: str, output_dir: str) -> None:
         item = QueueItem(title)
 
-        # вставляем перед финальным stretch
         stretch_idx = self.queue_layout.count() - 1
         self.queue_layout.insertWidget(stretch_idx, item)
 
@@ -586,12 +576,12 @@ class MainWindow(QMainWindow):
         elif ok:
             item.mark_done()
         else:
-            item.mark_error(msg or "неизвестная ошибка")
+            item.mark_error(msg or "unknown error")
 
     def _update_queue_count(self) -> None:
         active = len(self._download_workers)
         if active:
-            self.queue_count.setText(f"{active} активных")
+            self.queue_count.setText(f"{active} active")
         else:
             self.queue_count.setText("0")
 
@@ -618,10 +608,9 @@ class MainWindow(QMainWindow):
             self.url_input.setText(url)
             event.acceptProposedAction()
 
-    # ---------- закрытие ----------
+    # ---------- close ----------
 
     def closeEvent(self, event) -> None:
-        # отменяем всё, что качается
         for w in list(self._download_workers):
             w.cancel()
         super().closeEvent(event)

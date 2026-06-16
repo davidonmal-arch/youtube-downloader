@@ -1,13 +1,13 @@
-"""QThread-воркеры: качают в фоне, шлют сигналы в UI."""
+"""QThread workers: run downloads in the background, emit signals to the UI."""
 from __future__ import annotations
 
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal
 
 from . import downloader
 
 
 class InfoWorker(QThread):
-    """Тянет инфо о видео в фоне, чтобы UI не фризился."""
+    """Fetches video metadata in a background thread so the UI stays responsive."""
 
     ok = pyqtSignal(object)        # VideoInfo
     fail = pyqtSignal(str)         # error message
@@ -25,11 +25,11 @@ class InfoWorker(QThread):
 
 
 class DownloadWorker(QThread):
-    """Качает одно видео/аудио. Сигналы:"""
+    """Downloads a single video/audio."""
 
-    progress = pyqtSignal(dict)    # {percent, speed, eta, downloaded_bytes, total_bytes, status}
-    status = pyqtSignal(str)       # короткий статус ("Скачивание...", "Пост-обработка...")
-    finished = pyqtSignal(bool, str)  # (ok, message)
+    progress = pyqtSignal(dict)        # {percent, speed, eta, downloaded_bytes, total_bytes, status}
+    status = pyqtSignal(str)           # short status text
+    finished = pyqtSignal(bool, str)   # (ok, message)
 
     def __init__(self, url: str, quality: str, output_dir: str) -> None:
         super().__init__()
@@ -67,7 +67,7 @@ class DownloadWorker(QThread):
 
     def run(self) -> None:
         try:
-            self.status.emit("Подключение…")
+            self.status.emit("Connecting…")
             downloader.download(
                 self.url,
                 self.quality,
@@ -76,11 +76,11 @@ class DownloadWorker(QThread):
                 should_cancel=self._should_cancel,
             )
             if self._cancel:
-                self.finished.emit(False, "Отменено")
+                self.finished.emit(False, "Cancelled")
             else:
-                self.status.emit("Готово")
-                self.finished.emit(True, "Готово")
+                self.status.emit("Done")
+                self.finished.emit(True, "Done")
         except downloader._CancelledError:
-            self.finished.emit(False, "Отменено")
+            self.finished.emit(False, "Cancelled")
         except Exception as e:  # noqa: BLE001
             self.finished.emit(False, str(e))
